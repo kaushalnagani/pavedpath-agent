@@ -1,0 +1,12 @@
+{
+  "extends": "agents/tsconfig",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler",
+    "types": ["node", "vite/client"],
+    "noEmit": true,
+    "strict": true
+  },
+  "include": ["src", "test", "vite.config.ts", "env.d.ts"]
+}

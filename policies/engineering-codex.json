@@ -1,0 +1,47 @@
+[
+  {
+    "id": "DB-001",
+    "kind": "migration-rollback",
+    "title": "Database changes include rollback guidance",
+    "description": "Every changed database migration must document how it can be reversed or why it is irreversible.",
+    "severity": "high",
+    "remediation": "Add a down migration, rollback section, or an explicit irreversible migration explanation.",
+    "enabled": true
+  },
+  {
+    "id": "INFRA-001",
+    "kind": "infrastructure-owner",
+    "title": "Infrastructure changes identify an owner",
+    "description": "Infrastructure and deployment changes must identify the team or person responsible for rollout.",
+    "severity": "medium",
+    "remediation": "Add an owner or team annotation to the change, or supply owner metadata with the review request.",
+    "enabled": true
+  },
+  {
+    "id": "AUTH-001",
+    "kind": "auth-security-review",
+    "title": "Authentication changes require security review",
+    "description": "Changes to authentication, authorization, sessions, or permissions require explicit security review.",
+    "severity": "high",
+    "remediation": "Obtain security approval and attach the review reference to the change.",
+    "enabled": true
+  },
+  {
+    "id": "CI-001",
+    "kind": "ci-failure",
+    "title": "CI must complete without failures",
+    "description": "Failed CI commands, tests, and build steps block deployment.",
+    "severity": "high",
+    "remediation": "Resolve each reported CI failure and rerun the pipeline.",
+    "enabled": true
+  },
+  {
+    "id": "SEC-001",
+    "kind": "added-secret",
+    "title": "Secrets must not be committed",
+    "description": "Added source lines must not contain credentials, API keys, private keys, or tokens.",
+    "severity": "critical",
+    "remediation": "Remove the credential, rotate it, and reference a managed secret or environment variable instead.",
+    "enabled": true
+  }
+]
