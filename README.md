@@ -2,6 +2,8 @@
 
 An AI-assisted pull-request and CI policy reviewer built for Cloudflare's AI application assignment.
 
+![PavedPath AI live UI](docs/screenshot.png)
+
 **Paved path** is a platform-engineering term for the recommended, well-supported way to ship software. It is not a gate that replaces engineers: it makes the safe path easy, explains deviations, and leaves consequential decisions with a human. PavedPath AI applies that idea to pull-request diffs and CI logs.
 
 ## What it does
