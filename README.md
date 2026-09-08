@@ -25,12 +25,12 @@ Example questions include:
 
 This is deliberately more than a generic chatbot. It demonstrates the four parts requested in the assignment:
 
-| Requirement | PavedPath AI |
+| Requirement | PavedPath AI (implemented) |
 | --- | --- |
-| LLM | Workers AI with Llama 3.3 by default; optional Gemini or OpenAI-compatible local endpoint for development |
-| Workflow / coordination | A Worker/Agent starts and observes a durable Cloudflare Workflow |
-| User input | Browser chat/review interface |
-| Memory / state | Per-agent Durable Object storage, including local SQL where implemented |
+| LLM | Workers AI Llama 3.3 (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`) via `workers-ai-provider`; used for chat responses and workflow remediation summaries |
+| Workflow / coordination | `PolicyReviewWorkflow extends AgentWorkflow`: normalize → policy scan → AI remediation (retry ×3) → persist; progress callbacks drive the UI trace |
+| User input | React chat (`useAgentChat`) plus a paste-first review form (title/diff/optional CI log) and approval-gated exception recording |
+| Memory / state | `PavedPathAgent extends AIChatAgent<Env, PavedPathState>`; conversation messages persisted by the platform (SQLite-backed Durable Object storage); review state (`currentReview`, `history` capped at 20, `approvedExceptions` capped at 50) via `setState`; no custom SQL tables |
 
 It also separates deterministic policy decisions from probabilistic explanations. The model may summarize and recommend, but policy IDs, severities, and evidence come from code. This makes results easier to test, audit, and trust.
 
@@ -41,14 +41,13 @@ Browser chat
     │ HTTP / Agent connection
     ▼
 Cloudflare Worker + Agent
-    ├── conversation/review state (Durable Object / agent SQL)
-    ├── deterministic policy engine
+    ├── conversation/review state (Durable Object; platform SQLite-backed, no custom tables)
+    ├── deterministic policy engine (5 rules: DB-001, INFRA-001, AUTH-001, CI-001, SEC-001)
+    ├── secret redaction before model calls
     ├── model adapter
-    │     ├── Workers AI: Llama 3.3 (default)
-    │     ├── Google Gemini (optional)
-    │     └── OpenAI-compatible local endpoint (optional, development)
-    └── Cloudflare Workflow
-          ingest → normalize → evaluate → explain → persist
+    │     └── Workers AI: Llama 3.3 (implemented default; Gemini/local are future-only, not implemented)
+    └── Cloudflare Workflow (AgentWorkflow)
+          normalize → policy scan → AI remediation → persist
 ```
 
 See [docs/architecture.md](docs/architecture.md) for boundaries, data flow, threat model, and trade-offs.
@@ -81,35 +80,17 @@ If a command is not listed by `npm run`, it is still a project TODO and should n
 
 ### Model configuration
 
-Workers AI is the submission-default provider and should use the Worker `AI` binding. The intended model is:
+Workers AI is the only implemented provider and uses the Worker `AI` binding. The model is:
 
 ```text
 @cf/meta/llama-3.3-70b-instruct-fp8-fast
 ```
 
-No third-party API key is needed for that path. For an optional Gemini adapter, store the key as a secret—never commit it or paste it into chat, screenshots, fixtures, or prompt history:
+No third-party API key is needed. Gemini and OpenAI-compatible local adapters are **not implemented**; they are documented only as future options. Do not add keys for them, and never commit secrets or paste them into chat, screenshots, fixtures, or prompt history. If a Gemini adapter is added later, its key must be stored via:
 
 ```bash
 npx wrangler secret put GOOGLE_GENERATIVE_AI_API_KEY
 ```
-
-For local development, use a `.dev.vars` file that is ignored by Git:
-
-```dotenv
-LLM_PROVIDER=gemini
-GOOGLE_GENERATIVE_AI_API_KEY=replace-locally
-GOOGLE_MODEL=gemini-model-id
-```
-
-An OpenAI-compatible local server can be selected by configuration when the adapter is present:
-
-```dotenv
-LLM_PROVIDER=openai-compatible
-OPENAI_COMPATIBLE_BASE_URL=http://127.0.0.1:11434/v1
-OPENAI_COMPATIBLE_MODEL=local-model-name
-```
-
-Do not expose a machine-local model endpoint from a deployed Worker. A remote Worker cannot reach `127.0.0.1` on a developer laptop; this option is for local development unless a secured reachable inference service is supplied.
 
 ## Deploy
 
@@ -153,14 +134,36 @@ npm run typecheck
 
 ## Current scope and honest limitations
 
-This repository is an assignment-scale prototype. Verify the current code and test output before presenting any item below as complete.
+This repository is an assignment-scale prototype.
 
+**Verified locally on 2026-09-08 (`npm run check`: typecheck + 10 vitest tests + `vite build` all pass):**
+
+- 5 deterministic policy rules with evidence, unit-tested (`test/policy-engine.test.ts`).
+- `analyzeChange` bridge maps engine findings to UI verdicts (`pass` / `needs-attention` / `block`).
+- Secret redaction runs before workflow model prompts and is unit-tested.
+- Agent chat tools (`inspectChange`, `getReviewMemory`, approval-gated `rememberException`) typecheck against the installed `agents`/`@cloudflare/ai-chat` SDKs.
+- Workflow compiles: normalize → policy scan → remediation summary (3 retries, graceful `AI explanation unavailable` fallback) → persist via `saveReviewResult`.
+- Client builds to `dist/client`.
+
+**Deployed and verified live on 2026-09-08 (version `741b8921-a3b8-4608-bdcf-68c699e1c944`, 100% traffic):**
+
+- URL: `https://pavedpath-ai.pavedpath-ai.workers.dev`
+- `/` returns HTTP 200 `text/html` with the PavedPath app shell (title, `/assets/index-CSWbMjSi.js`, `/assets/index-D6nxSi00.css`).
+- `/assets/index-CSWbMjSi.js` returns HTTP 200 `text/javascript` (487,790 bytes, matching the local build).
+- `/agents/PavedPathAgent/review-demo` returns HTTP 400 `Invalid request` for both a plain GET and a bare WebSocket upgrade probe — the Worker and agent router are live; the route rejects requests that do not speak the agent protocol (expected).
+- Bindings confirmed on the deployment: `env.PavedPathAgent` (Durable Object), `env.POLICY_REVIEW_WORKFLOW` (Workflow), `env.AI` (AI).
+- Note: immediately after deploy, root checks briefly failed (one HTTP 502, then TLS handshake/transport errors); this was DNS/TLS propagation — the deploy output said DNS may take a few minutes. No workers.dev registration action was needed; the warning proved benign.
+- Re-verified 2026-09-08 15:38 UTC (same version, no redeploy): `/` HTTP 200 `text/html`, JS asset HTTP 200 `text/javascript` 487,790 bytes, agent route HTTP 400 `Invalid request`; `wrangler deployments list` still 100% on `741b8921-…`; `wrangler workflows list` shows `policy-review-workflow` (script `pavedpath-ai`, class `PolicyReviewWorkflow`). `npm run check` passes (typecheck + 10 tests + build).
+
+**Not verified / not implemented (do not present as complete):**
+
+- No end-to-end chat turn, review workflow execution, Workers AI inference, or refresh-persistence exercised against the deployed bindings — those remain unverified.
 - Input is paste-first; GitHub App/webhook ingestion is a follow-up.
-- Findings are advisory; automatic PR comments or code changes are not assumed.
+- Findings are advisory; automatic PR comments or code changes are not implemented.
+- No Gemini or OpenAI-compatible provider adapter exists in code.
+- No custom SQL tables; durability relies on Agent `setState`/message persistence (platform SQLite-backed DO storage).
 - Voice input, production authentication, organization-level tenancy, and a full eval dashboard are out of the MVP.
-- Provider adapters may not all be implemented. Workers AI remains the intended deployed path.
-- Workflow durability and SQL-backed history must be demonstrated against the deployed bindings, not inferred from local mocks.
-- LLM explanations can be wrong. The UI should distinguish deterministic evidence from model-generated advice.
+- LLM explanations can be wrong. The UI distinguishes deterministic evidence from model-generated advice.
 
 ## Submission materials
 

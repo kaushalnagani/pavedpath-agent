@@ -2,16 +2,15 @@ import { generateText } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { AgentWorkflow } from "agents/workflows";
 import type { AgentWorkflowEvent, AgentWorkflowStep } from "agents/workflows";
-import { analyzeChange } from "./policy-engine";
+import { analyzeChange, redactSecrets, POLICY_VERSION } from "./policy-engine";
 import type { PavedPathAgent } from "./server";
-import type { AppEnv } from "./env";
 import type { ReviewInput, ReviewProgress, ReviewResult } from "./types";
 
 export class PolicyReviewWorkflow extends AgentWorkflow<
   PavedPathAgent,
   ReviewInput,
   ReviewProgress,
-  AppEnv
+  Env
 > {
   async run(event: AgentWorkflowEvent<ReviewInput>, step: AgentWorkflowStep) {
     const input = event.payload;
@@ -55,13 +54,20 @@ export class PolicyReviewWorkflow extends AgentWorkflow<
               .map((finding) => `${finding.ruleId} (${finding.severity}): ${finding.evidence}`)
               .join("\n")
           : "No deterministic violations were found.";
-        const { text } = await generateText({
-          model: workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
-          system:
-            "You are a staff platform engineer. Summarize review evidence without inventing facts. Give the developer a short verdict and the next safest action. Keep it under 120 words.",
-          prompt: `Change: ${normalized.title}\n\nPolicy evidence:\n${findingText}`,
-        });
-        return text;
+        const { redacted } = redactSecrets(
+          `Change: ${normalized.title}\n\nPolicy evidence (${POLICY_VERSION}):\n${findingText}`,
+        );
+        try {
+          const { text } = await generateText({
+            model: workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+            system:
+              "You are a staff platform engineer. Summarize review evidence without inventing facts. Give the developer a short verdict and the next safest action. Keep it under 120 words.",
+            prompt: redacted.slice(0, 6000),
+          });
+          return text;
+        } catch (error) {
+          return `Deterministic verdict: ${scan.verdict}. AI explanation unavailable (${error instanceof Error ? error.message : "provider error"}). Follow the listed remediation steps.`;
+        }
       },
     );
 

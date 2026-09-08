@@ -78,19 +78,13 @@ A future remediation/write-back flow should be a separate workflow that pauses f
 
 ### Model provider boundary
 
-The application uses a small provider interface rather than embedding vendor logic in the policy engine:
+The application calls Workers AI directly through `workers-ai-provider` in exactly two places: `PavedPathAgent.onChatMessage` (chat) and `PolicyReviewWorkflow` (remediation summary). There is no `ExplanationProvider` abstraction, Gemini adapter, or OpenAI-compatible adapter in the current code — those remain future options only.
 
-```ts
-interface ExplanationProvider {
-  explain(input: GroundedReviewContext): Promise<ReviewExplanation>;
-}
-```
+Provider priority (as implemented vs planned):
 
-Provider priority:
-
-1. **Workers AI / Llama 3.3** for the deployed Cloudflare submission.
-2. **Gemini** as an optional adapter when a secret is configured.
-3. **OpenAI-compatible endpoint** for local-only development against tools such as Ollama or LM Studio.
+1. **Workers AI / Llama 3.3** — implemented; the deployed Cloudflare path.
+2. **Gemini** — not implemented; future optional adapter only.
+3. **OpenAI-compatible endpoint** — not implemented; future local-development option only.
 
 The prompt contains structured findings and bounded evidence, not the entire repository by default. Provider responses are parsed against a schema. Invalid or ungrounded output is rejected or displayed as unavailable rather than quietly accepted.
 
@@ -117,7 +111,7 @@ Workflow: ingest → normalize → policy engine ┤
 
 ## State model
 
-The Agent/Durable Object boundary provides per-conversation serialization and storage locality. Agent SQL is appropriate for review history because the data is relational and queried by review ID/status. Workflow state is execution state, not the long-term source of truth for user-visible review history.
+The Agent/Durable Object boundary provides per-conversation serialization and storage locality. In this implementation, review/chat durability comes from `AIChatAgent` message persistence plus `PavedPathState` (`currentReview`, `history`, `approvedExceptions`) managed with `setState` — both stored in the platform's SQLite-backed Durable Object storage. There are **no custom SQL tables** in this MVP. Workflow state is execution state, not the long-term source of truth for user-visible review history.
 
 State transitions should be monotonic:
 

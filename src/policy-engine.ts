@@ -1,4 +1,7 @@
-import policyCatalog from "../policies/engineering-codex.json" with { type: "json" };
+import policyCatalog from "../policies/engineering-codex.json";
+import type { Finding, Severity } from "./types";
+
+export const POLICY_VERSION = "engineering-codex-v1";
 
 export type PolicySeverity = "low" | "medium" | "high" | "critical";
 
@@ -246,5 +249,59 @@ export function analyzePolicies(input: PolicyInput, rules: readonly PolicyRule[]
     findings,
     evaluatedRuleIds: enabledRules.map((rule) => rule.id),
     summary,
+  };
+}
+
+const SECRET_VALUE = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|sk_live_[A-Za-z0-9]+|ghp_[A-Za-z0-9]+|gsk_[A-Za-z0-9_-]+|xox[bpas]-[A-Za-z0-9-]+|AIza[A-Za-z0-9_-]{10,}|["']?[A-Za-z0-9_+/=]{20,}["']?/g;
+
+export function redactSecrets(text: string): { redacted: string; redactionCount: number } {
+  let redactionCount = 0;
+  const redacted = text.replace(SECRET_VALUE, (match) => {
+    if (match.length < 8) return match;
+    redactionCount += 1;
+    return "[REDACTED]";
+  });
+  return { redacted, redactionCount };
+}
+
+function toFinding(result: PolicyFinding): Finding {
+  const first = result.evidence[0];
+  const evidence = result.evidence
+    .slice(0, 3)
+    .map((item) => `${item.file ? `${item.file}:` : ""}${item.targetLine ?? item.line ?? "?"} ${item.excerpt}`)
+    .join("\n");
+  return {
+    ruleId: result.ruleId,
+    title: result.title,
+    severity: result.severity as Severity,
+    evidence: `${result.message}\n${evidence}`.slice(0, 1200),
+    recommendation: result.remediation,
+    line: first?.targetLine ?? first?.line,
+  };
+}
+
+export interface ChangeAnalysis {
+  passed: boolean;
+  verdict: "pass" | "needs-attention" | "block";
+  findings: Finding[];
+  evaluatedRuleIds: string[];
+  summary: Record<PolicySeverity, number>;
+  policyVersion: string;
+}
+
+export function analyzeChange(input: PolicyInput, rules: readonly PolicyRule[] = DEFAULT_POLICY_RULES): ChangeAnalysis {
+  const analysis = analyzePolicies(input, rules);
+  const verdict = analysis.findings.some((finding) => finding.severity === "critical")
+    ? "block"
+    : analysis.findings.length > 0
+      ? "needs-attention"
+      : "pass";
+  return {
+    passed: analysis.passed,
+    verdict,
+    findings: analysis.findings.map(toFinding),
+    evaluatedRuleIds: analysis.evaluatedRuleIds,
+    summary: analysis.summary,
+    policyVersion: POLICY_VERSION,
   };
 }

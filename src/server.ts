@@ -10,7 +10,6 @@ import {
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import { analyzeChange } from "./policy-engine";
-import type { AppEnv } from "./env";
 import type {
   PavedPathState,
   ReviewInput,
@@ -28,7 +27,7 @@ Use inspectChange when the user shares a diff or CI log. Explain the smallest sa
 Use rememberException only when the user explicitly asks to record an exception; it requires human approval.
 Never claim that code was deployed, merged, or changed. Keep responses concise and practical.`;
 
-export class PavedPathAgent extends AIChatAgent<AppEnv> {
+export class PavedPathAgent extends AIChatAgent<Env, PavedPathState> {
   initialState: PavedPathState = {
     currentReview: null,
     history: [],
@@ -75,7 +74,7 @@ export class PavedPathAgent extends AIChatAgent<AppEnv> {
 
   async saveReviewResult(result: ReviewResult) {
     const withoutDuplicate = this.state.history.filter(
-      (review) => review.reviewId !== result.reviewId,
+      (review: ReviewResult) => review.reviewId !== result.reviewId,
     );
     this.setState({
       ...this.state,
@@ -131,7 +130,7 @@ export class PavedPathAgent extends AIChatAgent<AppEnv> {
     });
   }
 
-  async onChatMessage(_onFinish: unknown, _options?: OnChatMessageOptions) {
+  async onChatMessage(_onFinish: unknown, options?: OnChatMessageOptions) {
     const workersai = createWorkersAI({ binding: this.env.AI });
     const result = streamText({
       model: workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
@@ -150,7 +149,8 @@ export class PavedPathAgent extends AIChatAgent<AppEnv> {
             diff: z.string().describe("Unified pull-request diff"),
             ciLog: z.string().optional().describe("Relevant CI log output"),
           }),
-          execute: async ({ diff, ciLog }) => analyzeChange({ diff, ciLog }),
+          execute: async ({ diff, ciLog }: { diff: string; ciLog?: string }) =>
+            analyzeChange({ diff, ciLog }),
         }),
         getReviewMemory: tool({
           description: "Read the current review, recent verdicts, and approved policy exceptions.",
@@ -168,7 +168,7 @@ export class PavedPathAgent extends AIChatAgent<AppEnv> {
             reason: z.string().min(12),
           }),
           needsApproval: true,
-          execute: async ({ ruleId, reason }) => {
+          execute: async ({ ruleId, reason }: { ruleId: string; reason: string }) => {
             const exception = {
               ruleId,
               reason,
@@ -183,17 +183,17 @@ export class PavedPathAgent extends AIChatAgent<AppEnv> {
         }),
       },
       stopWhen: stepCountIs(5),
+      abortSignal: options?.abortSignal,
     });
     return result.toUIMessageStreamResponse();
   }
 }
 
 export default {
-  async fetch(request: Request, env: AppEnv) {
+  async fetch(request: Request, env: Env) {
     return (
       (await routeAgentRequest(request, env)) ??
-      env.ASSETS?.fetch(request) ??
       new Response("Not found", { status: 404 })
     );
   },
-} satisfies ExportedHandler<AppEnv>;
+} satisfies ExportedHandler<Env>;

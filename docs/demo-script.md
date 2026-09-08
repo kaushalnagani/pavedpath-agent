@@ -88,16 +88,16 @@ This demonstrates the failure mode instead of hiding it.
 
 ## Claims checklist
 
-Do not make a claim unless the recording proves it or the repository contains a passing test:
+Check only what the recording proves or the repository contains a passing test for. Status after the 2026-09-08 deployment verification (`https://pavedpath-ai.pavedpath-ai.workers.dev`, version `741b8921-a3b8-4608-bdcf-68c699e1c944` at 100%):
 
-- [ ] Deployed on Cloudflare
-- [ ] Workers AI/Llama 3.3 call is real
-- [ ] Workflow execution is real and durable
-- [ ] Agent state persists across refresh/reconnect
-- [ ] SQL-backed state is actually used
-- [ ] UI progress is streaming (not polling)
-- [ ] Gemini adapter works
-- [ ] Local provider adapter works
-- [ ] Policy test/eval metrics are reproducible
-- [ ] Secret redaction is implemented and tested
+- [x] Deployed on Cloudflare (root HTTP 200 app shell; JS asset HTTP 200, 487,790 bytes; `wrangler deployments list` shows the version at 100%)
+- [ ] Workers AI/Llama 3.3 call is real (binding `env.AI` present on deployment; no live inference exercised — do not claim a real call)
+- [ ] Workflow execution is real and durable (binding present; no live run exercised)
+- [ ] Agent state persists across refresh/reconnect (route `/agents/PavedPathAgent/review-demo` is live — plain GET and bare WS upgrade both return HTTP 400 `Invalid request`, proving the router rejects non-protocol requests; no authenticated session/reconnect exercised)
+- [ ] SQL-backed state is actually used (platform SQLite-backed DO storage only; no custom SQL tables — do not claim custom SQL)
+- [ ] UI progress is streaming (not polling) (progress callbacks update state; do not call it streaming unless verified)
+- [ ] Gemini adapter works (not implemented)
+- [ ] Local provider adapter works (not implemented)
+- [x] Policy test/eval metrics are reproducible (`npm test`: 10 vitest tests pass)
+- [x] Secret redaction is implemented and tested (`redactSecrets` unit-tested; applied before workflow model prompts)
 
